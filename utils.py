@@ -110,5 +110,33 @@ def desc_dict(x):
     """
     d = {}
     for i in range(len(x)):
-        d[descriptors[i]] = str(x[i])
+        d[descriptors[i]] = float(x[i])
     return d
+def _fng_mol(mol):
+    """
+    Parameters
+    ----------
+    smiles string, preg. canonical already
+    Returns
+    -------
+    fingeprint mols if no typerror
+    """
+
+    try:
+        return FingerprintMols.FingerprintMol(mol)
+    except TypeError:
+        return None
+def _sim(l1,l2):
+    """
+    Parameters
+    ----------
+    l1 fingerprint mol
+    l2 fingerprint mol
+    Returns
+    -------
+    Similarity
+    """
+    try:
+        return DataStructs.FingerprintSimilarity(l1,l2)
+    except:
+        return None

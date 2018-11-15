@@ -49,8 +49,10 @@ from pyspark.sql import SQLContext
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 from rdkit.ML.Descriptors import MoleculeDescriptors
+from rdkit import DataStructs
+from rdkit.Chem.Fingerprints import FingerprintMols
 
-from utils import (rdd2smile, clean, comp_desc, desc_dict)
+from utils import (rdd2smile, clean, comp_desc, desc_dict, _fng_mol, _sim)
 
 
 def run_experiment(filepath):
@@ -70,18 +72,20 @@ def run_experiment(filepath):
     calculator = MoleculeDescriptors.MolecularDescriptorCalculator(descriptors)
     df = sql_context.read.parquet(filepath)
     sqlContext.read.parquet
+    # l1 diclofenac
+    l1 = FingerprintMols.FingerprintMol(Chem.MolFromSmiles('C1=CC=C(C(=C1)CC(=O)O)NC2=C(C=CC=C2Cl)Cl'))
 
     with open('logfile.json', 'w') as json_file:
-        for num_lines in [1e5, 2e5, 5e5, 1e6, 1.5e6, 2e6]:
+        for num_lines in [2e6]:
             smiles_rdd = df.select('can_smiles') \
-                .limit(num_lines).rdd.repartition(10)
+                .limit(num_lines).rdd.repartition(1000)
             # map the previously defined function to the SMILES RDD
             cleaned_rdd = smiles_rdd.map(clean)
             # convert rdd to data frame, remove None values, assign to cleaned_df
             cleaned_df = cleaned_rdd.map(
                 lambda x: (x,)).toDF(['smiles']) \
                 .dropna(thresh=1, subset=('smiles'))
-            smiles_clean_rdd = cleaned_df.rdd.repartition(10)
+            smiles_clean_rdd = cleaned_df.rdd.repartition(1000).persist()
             start_query = datetime.now()
             # create RDD of MOL by using the map module and
             # MolFromSmiles from RDKit, run cleaning again
@@ -94,6 +98,12 @@ def run_experiment(filepath):
                 lambda x: x.HasSubstructMatch(Chem.MolFromSmiles('CO')))
             count = sub_rdd.collect().count(True)
             end_query = datetime.now()
+
+            mol_rdd = smiles_clean_rdd.map(lambda x: Chem.MolFromSmiles(rdd2smile(x)))
+            fng_rdd = mol_rdd.map(lambda x: _fng_mol(x))
+            sim_sol = fng_rdd.map(lambda x: _sim(l1, x)).filter(lambda x: x == 1.0).countByValue()
+
+            startDesc = datetime.now()
             desc_data_rdd = smiles_clean_rdd.map(
                 lambda x: comp_desc(rdd2smile(x), calculator))
             descriptors_df = desc_data_rdd.map(
@@ -106,7 +116,8 @@ def run_experiment(filepath):
                 'molecules': str(num_lines),
                 'totalTime': str(datetime.now() - start_time),
                 'queryTime': str(end_query - start_query),
-                'descTime': str(datetime.now() - end_query),
+                'descTime': str(datetime.now() - startDesc),
+                'simTime': str(startDesc - end_query),
                 'queryResultTrue': str(count)
             }
 
